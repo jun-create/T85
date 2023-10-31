@@ -49,7 +49,43 @@ void calc_bearing(int16_t x, int16_t y)
         heading_degrees += 360.0;
     }
 
-    printf("[Compass Bearing] %.2f degrees\n", heading_degrees);
+    printf("[Bearing] %.2f degrees\n", heading_degrees);
+    // if (heading_degrees > 337.5 || heading_degrees < 22.5)
+    // {
+    //     printf("[Compass] North\n");
+    // }
+    // else if (heading_degrees > 22.5 && heading_degrees < 67.5)
+    // {
+    //     printf("[Compass] North East\n");
+    // }
+    // else if (heading_degrees > 67.5 && heading_degrees < 112.5)
+    // {
+    //     printf("[Compass] East\n");
+    // }
+    // else if (heading_degrees > 112.5 && heading_degrees < 157.5)
+    // {
+    //     printf("[Compass] South East\n");
+    // }
+    // else if (heading_degrees > 157.5 && heading_degrees < 202.5)
+    // {
+    //     printf("[Compass] South\n");
+    // }
+    // else if (heading_degrees > 202.5 && heading_degrees < 247.5)
+    // {
+    //     printf("[Compass] South West\n");
+    // }
+    // else if (heading_degrees > 247.5 && heading_degrees < 292.5)
+    // {
+    //     printf("[Compass] West\n");
+    // }
+    // else if (heading_degrees > 292.5 && heading_degrees < 337.5)
+    // {
+    //     printf("[Compass] North West\n");
+    // }
+    // else
+    // {
+    //     printf("[Compass] Error\n");
+    // }
 }
 
 // Calculate acceleration from accelerometer data in m/s^2
@@ -133,7 +169,7 @@ int mag()
         read_accelerometer(&x_acc, &y_acc, &z_acc);
         read_magnetometer(&x_mag, &y_mag, &z_mag);
 
-        // calc_bearing(x_mag, y_mag);
+        calc_bearing(x_mag, y_mag);
         calc_acceleration(x_acc, y_acc, z_acc);
         printf("[Accel] (X = %d, Y = %d, Z = %d)\n", x_acc, y_acc, z_acc);
         printf("[Magnet] (X = %d, Y = %d, Z = %d)\n", x_mag, y_mag, z_mag);

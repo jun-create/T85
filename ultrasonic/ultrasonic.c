@@ -53,9 +53,9 @@ uint64_t getPulse(uint trigPin, uint echoPin)
     return absolute_time_diff_us(start_time, end_time);
 }
 
-uint64_t getCm(uint trigPin, uint echoPin)
+float getCm(uint trigPin, uint echoPin)
 {
-    uint64_t pulseLength = getPulse(trigPin, echoPin);
+    float pulseLength = (float)getPulse(trigPin, echoPin);
     return pulseLength / 29 / 2;
 }
 

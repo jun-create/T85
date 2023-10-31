@@ -14,13 +14,13 @@ int main()
     setupUltrasonicPins(trigPin, echoPin);
     while (true)
     {
-        printf("\n%d cm", getCm(trigPin, echoPin));
+        printf("%f cm\n", getCm(trigPin, echoPin));
         sleep_ms(300);
         if (detect_near_object(trigPin, echoPin))
         {
-            printf("Near object detected");
+            printf("Near object detected\n");
             continue;
         }
-        printf("No object detected");
+        printf("No object detected\n");
     }
 }

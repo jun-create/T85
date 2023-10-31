@@ -30,7 +30,11 @@ volatile static int8_t ir_digital_value = 0;
 static long long event_arr[SAMPLE_COUNT];
 static volatile long long start_time = 0;
 static volatile long long end_time = 0;
-static volatile long long transverse_width = 0;
+static volatile long long transverse_width = 1;
+static volatile long long old_transverse_width = 1;
+// assume speed of 10cm/s
+static volatile double speed = 10;
+
 volatile uint16_t sample_counter = 0;
 
 /*
@@ -183,8 +187,19 @@ void gpio_callback(uint gpio, uint32_t events)
         state = false;
         printf("[barcode] White detected!\n");
         end_time = getTimeMS();
+        // record time taken to travel
         long long transverse_width = end_time - start_time;
-        printf("[barcode] Time: %lldms\n\n", transverse_width);
+        double distance_in_cm = ((double)transverse_width / 1000) * speed;
+        printf("[barcode] Transverse width: %lld\n", transverse_width);
+        printf("[barcode] Distance: %f\n", distance_in_cm);
+        if (distance_in_cm > 2)
+        {
+            printf("Thick line\n");
+        }
+        else
+        {
+            printf("Thin line\n");
+        }
         // add to array
         event_arr[sample_counter] = transverse_width;
         sample_counter++;

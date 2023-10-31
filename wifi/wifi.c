@@ -72,9 +72,9 @@ err_t tcp_server_send_sensor_data(void *arg, char *data)
     {
         // strcpy(state->buffer_sent, (char *)(ir_digital_value));
         strcpy(state->buffer_sent, ir_digital_value ? "HIGH" : "LOW");
-        // Return ok message
+
         cyw43_arch_lwip_check();
-        err_t err = tcp_write(state->client_pcb, state->buffer_sent, BUF_SIZE, TCP_WRITE_FLAG_COPY);
+        err_t err = tcp_write(state->client_pcb, , BUF_SIZE, TCP_WRITE_FLAG_COPY);
 
         if (err != ERR_OK)
         {
@@ -89,24 +89,23 @@ err_t tcp_server_send_sensor_data(void *arg, char *data)
     }
 }
 
-err_t tcp_server_send_data(void *arg, struct tcp_pcb *tpcb)
-{
-    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-
-    // Set buffer to 'ok'
-    strcpy(state->buffer_sent, "Ok!");
-    // Return ok message
+err_t tcp_server_send_data(struct pbuf *p, void *arg, struct tcp_pcb *tpcb)
+{                                              // Send data over the TCP connection.
+    TCP_SERVER_T *state = (TCP_SERVER_T *)arg; // Retrieve the server state from the argument.
+    int len = p->tot_len;
+    if (p->tot_len > BUF_SIZE)
+        len = BUF_SIZE;
+    strncpy(state->buffer_sent, p->payload, len);
     cyw43_arch_lwip_check();
-    err_t err = tcp_write(tpcb, state->buffer_sent, BUF_SIZE, TCP_WRITE_FLAG_COPY);
-
+    err_t err = tcp_write(tpcb, state->buffer_sent, len, TCP_WRITE_FLAG_COPY);
     if (err != ERR_OK)
-    {
-        printf("Failed to write data!\n");
+    {                                      // Check if the write operation failed.
+        printf("Failed to write data!\n"); // Print an error message.
         return err;
     }
     else
     {
-        printf("Data sent successfully!\n");
+        printf("Data sent successfully!\n"); // Print a success message.
         return ERR_OK;
     }
 }
@@ -142,10 +141,11 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
     pbuf_free(p);
     free(payload);
 
+    char *print_help = "help:\ns, sen, sensor for sensor data\n enter or anything for send receive ok\n";
     // if else and call another function to send return message
     if ((strcmp(payload, "help") == 0) | (strcmp(payload, "help\n") == 0) | (strcmp(payload, "h") == 0))
     {
-        tcp_write(tpcb, "help:\ns, sen, sensor for sensor data\n enter or anything for send receive ok\n", 5, TCP_WRITE_FLAG_COPY);
+        tcp_write(tpcb, print_help, strlen(print_help), TCP_WRITE_FLAG_COPY);
     }
     else if ((strcmp(payload, "s") == 0) | (strcmp(payload, "sen") == 0) | (strcmp(payload, "sensor") == 0))
     {
