@@ -9,10 +9,17 @@
 #include <pico/stdlib.h>
 #include <hardware/adc.h>
 
+// for passing message to wifi
+#include "FreeRTOSConfig.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "message_buffer.h"
+#include <string.h>
+
 // define PWM and ADC pins
 #define ADC_PIN_LEFT 28  // not used right now
 #define ADC_PIN_RIGHT 27 // not used right now
-#define ADC_PIN_CENTER 0
+#define ADC_PIN_CENTER 26
 
 #define PWM_FREQ 20
 #define PWM_DUTY_CYCLE 50
@@ -36,6 +43,12 @@ static volatile long long old_transverse_width = 1;
 static volatile double speed = 10;
 
 volatile uint16_t sample_counter = 0;
+
+// for every bit of the barcode, send it into the message buffer for conversion
+MessageBufferHandle_t xControl_barcode_buffer;
+
+// for conversion of binary decrypted to text, send it into the message buffer to send to wifi
+MessageBufferHandle_t xControl_wifi_print_buffer;
 
 /*
  * Converts binary to decimal
@@ -155,12 +168,22 @@ void digitalise_barcode(uint8_t *buf)
 {
 }
 
-/* Tries to detect a barcode
+/*
+ * Tries to detect a barcode
  */
 static bool state = false;
 
+/*
+ * Tries to detect a barcode
+ */
 void gpio_callback(uint gpio, uint32_t events)
 {
+    char black_thick[5] = "111";
+    char black_thin[5] = "1";
+    char white_thick[5] = "000";
+    char white_thin[5] = "0";
+    char *scanned;
+
     // catch single event to ensure we don't get spurious interrupts
     if (events == GPIO_IRQ_EDGE_RISE)
     {
@@ -195,11 +218,22 @@ void gpio_callback(uint gpio, uint32_t events)
         if (distance_in_cm > 2)
         {
             printf("Thick line\n");
+            // save to message buffer
+            scanned = (char *)malloc(strlen(black_thick) + 1);
+            strcpy(scanned, black_thick);
         }
         else
         {
             printf("Thin line\n");
+            // save to message buffer
+            scanned = (char *)malloc(strlen(black_thin) + 1);
+            strcpy(scanned, black_thin);
         }
+
+        // send and clean up
+        xMessageBufferSend(xControl_barcode_buffer, (void *)&scanned, sizeof(scanned), 0);
+        free(scanned);
+
         // add to array
         event_arr[sample_counter] = transverse_width;
         sample_counter++;
@@ -208,6 +242,29 @@ void gpio_callback(uint gpio, uint32_t events)
     return;
 }
 
+/*
+ * Task to decrypt binary to text via code39
+ */
+void convert_bin_to_text_task(__unused void *params)
+{
+    // Variables to receive data from the message buffer
+    char *fReceivedData;
+    while (true)
+    {
+        // Receive data
+        xMessageBufferReceive(
+            xControl_barcode_buffer, /* The message buffer to receive from. */
+            (void *)&fReceivedData,  /* Location to store received data. */
+            sizeof(fReceivedData),   /* Maximum number of bytes to receive. */
+            portMAX_DELAY);          /* Wait indefinitely */
+
+        // Do processing
+
+        // Send to Wifi
+        printf("[barcode] %s\n", fReceivedData);
+        xMessageBufferSend(xControl_wifi_print_buffer, (void *)&fReceivedData, sizeof(fReceivedData), 0);
+    }
+}
 /*
  * Initialise the ADC and GPIO pins
  */
