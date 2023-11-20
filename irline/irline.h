@@ -1,5 +1,10 @@
 #ifndef irline_h
 #define irline_h
+#include "FreeRTOSConfig.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "message_buffer.h"
+
 // define PWM and ADC pins
 #define ADC_PIN_LEFT 28  // not used right now
 #define ADC_PIN_RIGHT 27 // not used right now
@@ -12,18 +17,24 @@
 // digitalise the analog signal
 #define NEUTRAL_VALUE 800
 #define DEBOUNCE_COUNT 3
-volatile static int8_t ir_digital_value = 0;
-
 // for bar code scanning
 #define SAMPLE_COUNT 2048
 #define SAMPLE_RATE 100         // in ms
 #define BARCODE_CHECK_TIME 2000 // in ms
+// tasks
+#define irline_TASK_MESSAGE_BUFFER_SIZE (60)
+
+// for every bit of the barcode, send it into the message buffer for conversion
+extern MessageBufferHandle_t xControl_barcode_buffer;
+
+// for conversion of binary decrypted to text, send it into the message buffer to send to wifi
+extern MessageBufferHandle_t xControl_wifi_print_buffer;
 
 /*
  * Converts binary to decimal
  * for converting binary bits of the barcode to decimal
  */
-int binaryToDecimal(int decimal);
+int binaryToDecimal(char *binary);
 
 /*
  * Get time in milliseconds
@@ -59,17 +70,16 @@ bool repeating_sample_adc_r(struct repeating_timer *t);
  * Digitalise the bar code signal from an array
  * convert binary of bar code into decimal
  */
-void digitalise_barcode(uint8_t *buf);
-/* Tries to detect a barcode
- */
-bool state = false;
-
+void bin_barcode_collection_task(__unused void *params);
+void convert_bin_to_text_task(__unused void *params);
 void gpio_callback(uint gpio, uint32_t events);
+void wifi_gpio_callback(uint gpio, uint32_t events);
 /*
  * Initialise the ADC and GPIO pins
  */
 void init_adc();
-
 int line();
 int barcode();
+int barcodeTest();
+int barcodeOverWifi();
 #endif

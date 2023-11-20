@@ -199,10 +199,10 @@ void start_server(__unused void *params)
     }
 }
 
-int main()
+int wifi()
 {
     stdio_init_all();
-    stdio_usb_init();
+    // stdio_usb_init()
     sleep_ms(5000);
     // Create the server task
     TaskHandle_t wifi_task;

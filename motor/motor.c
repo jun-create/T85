@@ -116,7 +116,7 @@ void steer_right(uint *slice_num_1, uint *slice_num_2)
     pwm_set_chan_level(*slice_num_2, PWM_CHAN_B, DEFAULT_SPEED);
 }
 
-int main()
+int motor()
 {
     init_gpio();
     stdio_init_all();

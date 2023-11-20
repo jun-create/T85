@@ -4,22 +4,26 @@
  */
 
 /* Feed the GP2 into the ADC at GP26 */
+#include <stdlib.h>
 #include <sys/time.h>
 #include <stdio.h>
 #include <pico/stdlib.h>
 #include <hardware/adc.h>
+#include <string.h>
+
+// include header
+#include "irline.h"
 
 // for passing message to wifi
 #include "FreeRTOSConfig.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "message_buffer.h"
-#include <string.h>
 
 // define PWM and ADC pins
 #define ADC_PIN_LEFT 28  // not used right now
 #define ADC_PIN_RIGHT 27 // not used right now
-#define ADC_PIN_CENTER 26
+#define ADC_PIN_CENTER 0
 
 #define PWM_FREQ 20
 #define PWM_DUTY_CYCLE 50
@@ -34,6 +38,14 @@ volatile static int8_t ir_digital_value = 0;
 #define SAMPLE_COUNT 2048
 #define SAMPLE_RATE 100         // in ms
 #define BARCODE_CHECK_TIME 2000 // in ms
+// tasks
+#define irline_TASK_MESSAGE_BUFFER_SIZE (60)
+// for every bit of the barcode, send it into the message buffer for conversion
+MessageBufferHandle_t xControl_barcode_buffer;
+// for conversion of binary decrypted to text, send it into the message buffer to send to wifi
+MessageBufferHandle_t xControl_wifi_print_buffer;
+
+// calculations
 static long long event_arr[SAMPLE_COUNT];
 static volatile long long start_time = 0;
 static volatile long long end_time = 0;
@@ -43,29 +55,28 @@ static volatile long long old_transverse_width = 1;
 static volatile double speed = 10;
 
 volatile uint16_t sample_counter = 0;
-
-// for every bit of the barcode, send it into the message buffer for conversion
-MessageBufferHandle_t xControl_barcode_buffer;
-
-// for conversion of binary decrypted to text, send it into the message buffer to send to wifi
-MessageBufferHandle_t xControl_wifi_print_buffer;
-
 /*
- * Converts binary to decimal
+ * Converts binary(string) to decimal
  * for converting binary bits of the barcode to decimal
+ * (with online support)
  */
-int binaryToDecimal(int decimal)
+int binaryToDecimal(char *binary)
 {
-    int binary = 0;
-    int i = 0;
+    char *num = binary;
+    int dec_value = 0;
 
-    while (decimal != 0)
+    // Initializing base value to 1
+    int base = 1;
+
+    int len = strlen(num);
+    for (int i = len - 1; i >= 0; i--)
     {
-        binary |= (decimal & 1) << i;
-        decimal >>= 1;
-        i++;
+        if (num[i] == '1')
+            dec_value += base;
+        base = base * 2;
     }
-    return binary;
+
+    return dec_value;
 }
 
 /*
@@ -159,31 +170,14 @@ bool repeating_sample_adc_r(struct repeating_timer *t)
     printf("[adc_raw] %d\n", adc_read());
     return true;
 }
-
-/*
- * Digitalise the bar code signal from an array
- * convert binary of bar code into decimal
- */
-void digitalise_barcode(uint8_t *buf)
-{
-}
-
-/*
- * Tries to detect a barcode
+/* Tries to detect a barcode
  */
 static bool state = false;
-
 /*
  * Tries to detect a barcode
  */
 void gpio_callback(uint gpio, uint32_t events)
 {
-    char black_thick[5] = "111";
-    char black_thin[5] = "1";
-    char white_thick[5] = "000";
-    char white_thin[5] = "0";
-    char *scanned;
-
     // catch single event to ensure we don't get spurious interrupts
     if (events == GPIO_IRQ_EDGE_RISE)
     {
@@ -218,21 +212,88 @@ void gpio_callback(uint gpio, uint32_t events)
         if (distance_in_cm > 2)
         {
             printf("Thick line\n");
+        }
+        else
+        {
+            printf("Thin line\n");
+        }
+        // add to array
+        event_arr[sample_counter] = transverse_width;
+        sample_counter++;
+        return;
+    }
+    return;
+}
+
+void wifi_gpio_callback(uint gpio, uint32_t events)
+{
+    size_t xBytesSent;
+    char black_thick[5] = "111";
+    char black_thin[5] = "1";
+    // char white_thick[5] = "000";
+    // char white_thin[5] = "0";
+    char *pcStringToSend;
+
+    // catch single event to ensure we don't get spurious interrupts
+    if (events == GPIO_IRQ_EDGE_RISE)
+    {
+        // the timer has fired
+        if (state == true)
+        {
+            return;
+        }
+        //
+        // detect black bar, start timer
+        state = true;
+        printf("[barcode] Black detected!\n");
+        start_time = getTimeMS();
+        return;
+    }
+
+    // catch single event to ensure we don't get spurious interrupts
+    if (events == GPIO_IRQ_EDGE_FALL)
+    {
+        if (state == false)
+        {
+            return;
+        }
+        // detect white space, end timer, calculate pulse width
+        state = false;
+        printf("[barcode] White detected!\n");
+        end_time = getTimeMS();
+        // record time taken to travel
+        long long transverse_width = end_time - start_time;
+        double distance_in_cm = ((double)transverse_width / 1000) * speed;
+        printf("[barcode] Transverse width: %lld\n", transverse_width);
+        printf("[barcode] Distance: %f\n", distance_in_cm);
+        if (distance_in_cm > 2)
+        {
+            printf("Thick line\n");
             // save to message buffer
-            scanned = (char *)malloc(strlen(black_thick) + 1);
-            strcpy(scanned, black_thick);
+            pcStringToSend = (char *)malloc(strlen(black_thick) + 1);
+            strcpy(pcStringToSend, black_thick);
         }
         else
         {
             printf("Thin line\n");
             // save to message buffer
-            scanned = (char *)malloc(strlen(black_thin) + 1);
-            strcpy(scanned, black_thin);
+            pcStringToSend = (char *)malloc(strlen(black_thin) + 1);
+            strcpy(pcStringToSend, black_thin);
         }
 
-        // send and clean up
-        xMessageBufferSend(xControl_barcode_buffer, (void *)&scanned, sizeof(scanned), 0);
-        free(scanned);
+        // send from isr and clean up
+        xBytesSent = xMessageBufferSend(xControl_barcode_buffer,
+                                        (void *)&pcStringToSend,
+                                        strlen(pcStringToSend),
+                                        pdFALSE);
+        free(pcStringToSend);
+
+        // error handling
+        if (xBytesSent != strlen(pcStringToSend))
+        {
+            /* The string could not be added to the message buffer because there was
+            not enough free space in the buffer. */
+        }
 
         // add to array
         event_arr[sample_counter] = transverse_width;
@@ -240,6 +301,32 @@ void gpio_callback(uint gpio, uint32_t events)
         return;
     }
     return;
+}
+/*
+ * Task to collect binary from irsensor
+ */
+void bin_barcode_collection_task(__unused void *params)
+{
+    char *fReceivedData;                            // data for each bit of the barcode when interrupt
+    char barcode_capture_string[SAMPLE_COUNT] = ""; // need function to reset this barcode_capture_string
+    while (true)
+    {
+        // Receive data
+        xMessageBufferReceive(
+            xControl_barcode_buffer, /* The message buffer to receive from. */
+            (void *)&fReceivedData,  /* Location to store received data. */
+            sizeof(fReceivedData),   /* Maximum number of bytes to receive. */
+            portMAX_DELAY);          /* Wait indefinitely */
+        // Collect data
+        strcat(barcode_capture_string, fReceivedData); // add to string
+        fReceivedData = "";                            // reset fReceivedData
+
+        // send to conversion_task
+        xMessageBufferSend(xControl_barcode_buffer,
+                           (void *)&barcode_capture_string,
+                           sizeof(barcode_capture_string),
+                           0);
+    }
 }
 
 /*
@@ -259,6 +346,7 @@ void convert_bin_to_text_task(__unused void *params)
             portMAX_DELAY);          /* Wait indefinitely */
 
         // Do processing
+        printf("[task] %s\n", fReceivedData);
 
         // Send to Wifi
         printf("[barcode] %s\n", fReceivedData);
@@ -290,22 +378,38 @@ int line()
         sleep_ms(1000);
     }
 }
-
-int barcode()
+// set up to read the adc raw values
+int barcodeTest()
 {
-    init_adc();
+    struct repeating_timer sampler_r;
+    add_repeating_timer_ms(-200, repeating_sample_adc_r, NULL, &sampler_r);
 
-    // set up to read the adc raw values
-    // struct repeating_timer sampler_r;
-    // add_repeating_timer_ms(-200, repeating_sample_adc_r, NULL, &sampler_r);
-
-    // set up interrupt to sample black bars
-    gpio_set_irq_enabled_with_callback(ADC_PIN_CENTER, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
-
+    return 0;
     while (1)
     {
         // tight_loop_contents();
         sleep_ms(1000);
     }
+}
+// in use for local testing, set up interrupt to sample black bars
+int barcode()
+{
+    init_adc();
+    gpio_set_irq_enabled_with_callback(ADC_PIN_CENTER, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &gpio_callback);
+    while (1)
+    {
+        // tight_loop_contents();
+        sleep_ms(1000);
+    }
+    return 0;
+}
+
+// coding for final product
+int barcodeOverWifi()
+{
+    init_adc();
+    gpio_set_irq_enabled_with_callback(ADC_PIN_CENTER, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &wifi_gpio_callback);
+
+    vTaskStartScheduler();
     return 0;
 }

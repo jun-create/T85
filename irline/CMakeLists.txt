@@ -18,6 +18,7 @@ target_link_libraries(pico_irline
                       pico_stdlib
                       hardware_adc
                       FreeRTOS-Kernel-Heap4 # FreeRTOS kernel and dynamic heap
+                      
                       )
 
 target_include_directories(pico_irline PUBLIC 

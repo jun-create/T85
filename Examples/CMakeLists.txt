@@ -24,7 +24,6 @@ target_link_libraries(taskmanager
                         
                       pico_cyw43_arch_lwip_threadsafe_background
                       pico_lwip_iperf # for wifi
-                      # freertos
                       FreeRTOS-Kernel-Heap4 # FreeRTOS kernel and dynamic heap
                       )
 

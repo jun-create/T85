@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <math.h>
 
-// drivers
+// drivers header files
 // #include "encoder.h"
 #include "irline.h"
 // #include "magnometer.h"
@@ -13,6 +13,7 @@
 // #include "wifi.h"
 
 // tasks
+#include "FreeRTOSConfig.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "message_buffer.h"
@@ -29,9 +30,6 @@ MessageBufferHandle_t xControlSimpleAverageBuffer;
 // for print task 4
 MessageBufferHandle_t xControlAveragePrintBuffer;
 MessageBufferHandle_t xControlSimpleAveragePrintBuffer;
-
-// irline task
-// MessageBufferHandle_t xControl_irline_buffer;
 
 float read_onboard_temperature()
 {
@@ -144,7 +142,6 @@ void print_task(void *params)
     // Variables to receive data from the message buffer
     float fReceivedData_avg_temp;
     float fReceivedData_simple_avg_temp;
-    char *fReceivedData_line_size;
 
     while (true)
     {
@@ -160,44 +157,109 @@ void print_task(void *params)
             sizeof(fReceivedData_simple_avg_temp),  /* Maximum number of bytes to receive. */
             portMAX_DELAY);                         /* Wait indefinitely */
 
-        xMessageBufferReceive(
-            xControl_irline_buffer,           /* The message buffer to receive from. */
-            (void *)&fReceivedData_line_size, /* Location to store received data. */
-            sizeof(fReceivedData_line_size),  /* Maximum number of bytes to receive. */
-            portMAX_DELAY);                   /* Wait indefinitely */
-
         // Print data
         printf("[Temp] Average: %0.2f C\n", fReceivedData_avg_temp);
         printf("[Temp] Simple Average: %0.2f C\n", fReceivedData_simple_avg_temp);
-        printf("[irline] line size: %s\n", fReceivedData_line_size);
     }
 }
 
 void vLaunch(void)
 {
-    TaskHandle_t temptask;
-    xTaskCreate(temp_task, "TestTempThread", configMINIMAL_STACK_SIZE, NULL, 8, &temptask);
-    TaskHandle_t avgtask;
-    xTaskCreate(avg_task, "TestAvgThread", configMINIMAL_STACK_SIZE, NULL, 9, &avgtask);
-    TaskHandle_t simpleavgtask;
-    xTaskCreate(simple_avg_task, "TestSimpleAvgThread", configMINIMAL_STACK_SIZE, NULL, 10, &simpleavgtask);
-    TaskHandle_t printtask;
-    xTaskCreate(print_task, "TestPrintThread", configMINIMAL_STACK_SIZE, NULL, 11, &printtask);
+    // TaskHandle_t temptask;
+    // xTaskCreate(temp_task, "TestTempThread", configMINIMAL_STACK_SIZE, NULL, 8, &temptask);
+    // TaskHandle_t avgtask;
+    // xTaskCreate(avg_task, "TestAvgThread", configMINIMAL_STACK_SIZE, NULL, 9, &avgtask);
+    // TaskHandle_t simpleavgtask;
+    // xTaskCreate(simple_avg_task, "TestSimpleAvgThread", configMINIMAL_STACK_SIZE, NULL, 10, &simpleavgtask);
+    // TaskHandle_t printtask;
+    // xTaskCreate(print_task, "TestPrintThread", configMINIMAL_STACK_SIZE, NULL, 11, &printtask);
 
     // task operations examples
     // vTaskSuspend(irline_task_handle);
     // vTaskResume(irline_task_handle);
     // vTaskDelete(irline_task_handle);
 
-    xControlAverageBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
-    xControlSimpleAverageBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
-    xControlAveragePrintBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
-    xControlSimpleAveragePrintBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+    // xControlAverageBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+    // xControlSimpleAverageBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+    // xControlAveragePrintBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+    // xControlSimpleAveragePrintBuffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
 
+    /*
+     * Straight Path    (Motor, Encoder, IR) [Max 4 marks]
+     * - [4] Perfect straight drive
+     * - [3] Snaking but finishing without touching a line
+     * - [2] Wheel touch the line but finish
+     * - [1] Reasonable attempt
+     * 1. get line size from irline
+     * 2. if right side ir sensor touches the line,
+     * correct the motor and encoder to steer a bit left for 2-3 units of encoder
+     * 3. if left side ir sensor touches the line,
+     * correct the motor and encoder to steer a bit right for 2-3 ticks of encoder
+     * 4. have motor run at constant speed
+     */
+
+    /*
+     * Right/left-angle turn (Motor, Encoder, IR, Magnetometer) [Max 4 marks]
+     * - [4] Demonstrate move to a corner, turn and continue moving straight without touching the line for some distance
+     * - [3] Demonstrate move to a corner and turn only without touching the line
+     * - [2] Demonstrate move to a corner and turns successfully but touching the line
+     * - [1] Reasonable attempt
+     */
+
+    /*
+     * Drive through and detect barcode-decode and send to WiFi (Motor, Encoder, IR, WiFi) [Max 4 marks]
+     * - [4] Motor-driven and detects barcode correctly in both directions and displays via WiFi (for all three sizes)
+     * - [3] Motor-driven and detects barcode correctly in a single direction and displays via WiFi (for all three sizes)
+     * - [2] Hand-driven detects and decodes barcode successfully (for the largest size)
+     * - [1] Reasonable attempt
+     *
+     * 1. Motor runs at constant speed
+     * 2. Irline detects the line size
+     * 3. Records and stores the line sizes
+     * 4. When irline sensor detects the end of the line,
+     * 5. saves the barcode value as binary,
+     * 6. converts binary to via code39
+     * 7. sends converted code to the WiFi
+     */
+    // task to run
     // irline
-    TaskHandle_t irline_task_handle;
-    xTaskCreate(irline_task, "TestIrlineThread", configMINIMAL_STACK_SIZE, NULL, 11, &irline_task_handle);
-    xControl_irline_buffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+    // TaskHandle_t irline_task_handle;
+    // xTaskCreate(irline_task, "TestIrlineThread", configMINIMAL_STACK_SIZE, NULL, 11, &irline_task_handle);
+    // xControl_irline_buffer = xMessageBufferCreate(mbaTASK_MESSAGE_BUFFER_SIZE);
+
+    // motor speed task
+
+    // init
+    xControl_barcode_buffer = xMessageBufferCreate(irline_TASK_MESSAGE_BUFFER_SIZE);
+    // inits interrupt for scanning
+    barcodeOverWifi();
+    // collate whole barcode via xControl_barcode_buffer handle
+    TaskHandle_t barcode_collection_task_hdle;
+    xTaskCreate(bin_barcode_collection_task, "BarcodeCollectionThread", configMINIMAL_STACK_SIZE, NULL, 8, &barcode_collection_task_hdle);
+
+    // convert from binary to text task
+    TaskHandle_t conversion_task_hdle;
+    xTaskCreate(convert_bin_to_text_task,
+                "ConvertBinToTextThread",
+                configMINIMAL_STACK_SIZE,
+                NULL,
+                8,
+                &conversion_task_hdle);
+    // send to wifi, to print task
+    TaskHandle_t wifi_to_print_task;
+    xTaskCreate(convert_bin_to_text_task,
+                "ConvertBinToTextThread",
+                configMINIMAL_STACK_SIZE,
+                NULL,
+                8,
+                &conversion_task_hdle);
+
+    /*
+     * Drive through and detect obstacles and Stop (motor, encoder, IR, Ultrasonic) [Max 3 marks]
+     * - [3] Motor-driven and detect obstacles and reverse/U-turn
+     * - [2] Motor-driven and detect obstacles and stop
+     * - [1] Reasonable attempt *
+     */
 
     /* Start the tasks and timer running. */
     vTaskStartScheduler();
