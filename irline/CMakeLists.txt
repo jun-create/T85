@@ -25,6 +25,7 @@ target_include_directories(pico_irline PUBLIC
                             ${CMAKE_CURRENT_LIST_DIR}
                             ${CMAKE_CURRENT_LIST_DIR}/..
                             )
+pico_enable_stdio_usb(pico_irline 1)                        
 
 #example __________________________
 # add_executable(wifi

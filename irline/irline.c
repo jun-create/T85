@@ -4,10 +4,10 @@
  */
 
 /* Feed the GP2 into the ADC at GP26 */
+#include <pico/stdlib.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <stdio.h>
-#include <pico/stdlib.h>
 #include <hardware/adc.h>
 #include <string.h>
 
@@ -309,6 +309,7 @@ void bin_barcode_collection_task(__unused void *params)
 {
     char *fReceivedData;                            // data for each bit of the barcode when interrupt
     char barcode_capture_string[SAMPLE_COUNT] = ""; // need function to reset this barcode_capture_string
+    int barcode_units = 0;                          // 9 units make up 1 character, send characters when barcode_units >= 9
     while (true)
     {
         // Receive data
@@ -320,12 +321,15 @@ void bin_barcode_collection_task(__unused void *params)
         // Collect data
         strcat(barcode_capture_string, fReceivedData); // add to string
         fReceivedData = "";                            // reset fReceivedData
+        printf("fReceivedData: %s\n", fReceivedData);
 
-        // send to conversion_task
-        xMessageBufferSend(xControl_barcode_buffer,
-                           (void *)&barcode_capture_string,
-                           sizeof(barcode_capture_string),
-                           0);
+        if (barcode_units >= 9)
+        { // send to conversion_task
+            xMessageBufferSend(xControl_barcode_buffer,
+                               (void *)&barcode_capture_string,
+                               sizeof(barcode_capture_string),
+                               0);
+        }
     }
 }
 
@@ -346,10 +350,10 @@ void convert_bin_to_text_task(__unused void *params)
             portMAX_DELAY);          /* Wait indefinitely */
 
         // Do processing
-        printf("[task] %s\n", fReceivedData);
+        printf("[task] %d\n", binaryToDecimal(fReceivedData));
+        printf("[barcode] %s\n", fReceivedData);
 
         // Send to Wifi
-        printf("[barcode] %s\n", fReceivedData);
         xMessageBufferSend(xControl_wifi_print_buffer, (void *)&fReceivedData, sizeof(fReceivedData), 0);
     }
 }
@@ -378,19 +382,21 @@ int line()
         sleep_ms(1000);
     }
 }
+
 // set up to read the adc raw values
 int barcodeTest()
 {
     struct repeating_timer sampler_r;
     add_repeating_timer_ms(-200, repeating_sample_adc_r, NULL, &sampler_r);
 
-    return 0;
     while (1)
     {
         // tight_loop_contents();
         sleep_ms(1000);
     }
+    return 0;
 }
+
 // in use for local testing, set up interrupt to sample black bars
 int barcode()
 {

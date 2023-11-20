@@ -13,16 +13,19 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include "message_buffer.h"
 
 #define TCP_PORT 4242
 #define BUF_SIZE 2048
+#define wifi_TASK_MESSAGE_BUFFER_SIZE (60)
+MessageBufferHandle_t xControl_Process_Task_Buffer;
 
 // TCP Packet structure
 typedef struct TCP_SERVER_T_
 {
     struct tcp_pcb *server_pcb;
     struct tcp_pcb *client_pcb;
-    bool complete;
+    bool connected;
     char buffer_sent[BUF_SIZE];
     uint8_t buffer_recv[BUF_SIZE];
     int sent_len;
@@ -51,9 +54,14 @@ static void tcp_server_err(void *arg, err_t err)
 }
 
 // Function to send data to the client
-err_t tcp_server_send_data(struct pbuf *p, void *arg, struct tcp_pcb *tpcb)
+err_t tcp_server_send_data(struct pbuf *p, void *arg)
 {
     TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
+    if (!state->connected)
+    {
+        printf("[wifi] Not connected\n");
+        return ERR_OK;
+    }
     int len = p->tot_len;
     if (p->tot_len > BUF_SIZE)
         len = BUF_SIZE;
@@ -61,10 +69,10 @@ err_t tcp_server_send_data(struct pbuf *p, void *arg, struct tcp_pcb *tpcb)
     strncpy(state->buffer_sent, p->payload, len);
     cyw43_arch_lwip_check();
     // send the buffer
-    err_t err = tcp_write(tpcb, state->buffer_sent, len, TCP_WRITE_FLAG_COPY); // Write data to the TCP connection
-    err_t err2 = tcp_write(tpcb, "hi\n", 3, TCP_WRITE_FLAG_COPY);              // Write data to the TCP connection
+    // err_t err2 = tcp_write(tpcb, "hi\n", 3, TCP_WRITE_FLAG_COPY);              // Write data to the TCP connection
+    err_t err = tcp_write(state->client_pcb, state->buffer_sent, len, TCP_WRITE_FLAG_COPY); // Write data to the TCP connection
     // Check if the write operation failed
-    if (err != ERR_OK || err2 != ERR_OK)
+    if (err != ERR_OK)
     {
         printf("[wifi] Failed to write data!\n");
         return err;
@@ -96,11 +104,16 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
     // Check if the total length of received data is greater than 0
     else if (p->tot_len > 0)
     {
+        // Send the received data to the process task
+        xMessageBufferSend(xControl_Process_Task_Buffer,
+                           p->payload,
+                           p->tot_len,
+                           portMAX_DELAY);
         // Print the received data
         printf("[wifi][Buffer] value: %0.s\n[wifi][Buffer] len: %d\n", p->tot_len, p->payload, p->tot_len);
     }
     // Send a response to the client
-    tcp_server_send_data(p, arg, state->client_pcb);
+    tcp_server_send_data(p, arg);
 
     // Free packet buffer
     pbuf_free(p);
@@ -122,6 +135,8 @@ static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err)
     tcp_arg(client_pcb, state);
     tcp_recv(client_pcb, tcp_server_recv);
     tcp_err(client_pcb, tcp_server_err);
+
+    state->connected = true;
     return ERR_OK;
 }
 
@@ -157,6 +172,8 @@ static bool tcp_server_open(void *arg)
     }
     tcp_arg(state->server_pcb, state);                // Set the argument for the server PCB
     tcp_accept(state->server_pcb, tcp_server_accept); // Set the callback for accepting client connections
+
+    state->connected = false;
     return true;
 }
 
@@ -199,7 +216,21 @@ void start_server(__unused void *params)
     }
 }
 
-int wifi()
+void process_task(__unused void *params)
+{
+    while (true)
+    {
+        char buffer[BUF_SIZE];
+        xMessageBufferReceive(xControl_Process_Task_Buffer,
+                              buffer,
+                              BUF_SIZE,
+                              portMAX_DELAY);
+        printf("[wifi][Buffer] value: %0.s\n[wifi][Buffer] len: %d\n", BUF_SIZE, buffer, BUF_SIZE);
+        // TO DO: send the data
+    }
+}
+
+void wifi()
 {
     stdio_init_all();
     // stdio_usb_init()
@@ -208,8 +239,9 @@ int wifi()
     TaskHandle_t wifi_task;
     xTaskCreate(start_server, "StartServer", configMINIMAL_STACK_SIZE, NULL, 4, &wifi_task);
     // Other tasks may go here...
-
+    TaskHandle_t process_task_hdle;
+    xTaskCreate(process_task, "PrintTask", configMINIMAL_STACK_SIZE, NULL, 4, &process_task_hdle);
+    xControl_Process_Task_Buffer = xMessageBufferCreate(wifi_TASK_MESSAGE_BUFFER_SIZE);
     // Start the FreeRTOS task scheduler
     vTaskStartScheduler();
-    return 0;
 }

@@ -10,7 +10,7 @@
 // #include "magnometer.h"
 // #include "motor.h"
 // #include "ultrasonic.h"
-// #include "wifi.h"
+#include "wifi.h"
 
 // tasks
 #include "FreeRTOSConfig.h"
@@ -134,7 +134,10 @@ void simple_avg_task(__unused void *params)
         xMessageBufferSend(xControlSimpleAveragePrintBuffer, (void *)&simple_avg_temperature, sizeof(simple_avg_temperature), 0);
     }
 }
-
+void barcode_task(__unused void *params)
+{
+    barcodeOverWifi();
+}
 // The fourth task is exclusively for executing all the printf statements.
 // This function receives the data from the avg_task, simple_avg_task and print it.
 void print_task(void *params)
@@ -163,8 +166,17 @@ void print_task(void *params)
     }
 }
 
+void wifi_task(__unused void *params)
+{
+    stdio_init_all();
+}
+
 void vLaunch(void)
 {
+    // wifi task
+    TaskHandle_t wifi_task_hdle;
+    xTaskCreate(wifi, "TestWifiThread", configMINIMAL_STACK_SIZE, NULL, 8, &wifi_task_hdle);
+
     // TaskHandle_t temptask;
     // xTaskCreate(temp_task, "TestTempThread", configMINIMAL_STACK_SIZE, NULL, 8, &temptask);
     // TaskHandle_t avgtask;
@@ -232,7 +244,9 @@ void vLaunch(void)
     // init
     xControl_barcode_buffer = xMessageBufferCreate(irline_TASK_MESSAGE_BUFFER_SIZE);
     // inits interrupt for scanning
-    barcodeOverWifi();
+    TaskHandle_t barcode_task_hdle;
+    xTaskCreate(barcode_task, "BarcodeCollectionThread", configMINIMAL_STACK_SIZE, NULL, 8, &barcode_task_hdle);
+
     // collate whole barcode via xControl_barcode_buffer handle
     TaskHandle_t barcode_collection_task_hdle;
     xTaskCreate(bin_barcode_collection_task, "BarcodeCollectionThread", configMINIMAL_STACK_SIZE, NULL, 8, &barcode_collection_task_hdle);
@@ -248,11 +262,11 @@ void vLaunch(void)
     // send to wifi, to print task
     TaskHandle_t wifi_to_print_task;
     xTaskCreate(convert_bin_to_text_task,
-                "ConvertBinToTextThread",
+                "SendViaThread",
                 configMINIMAL_STACK_SIZE,
                 NULL,
                 8,
-                &conversion_task_hdle);
+                &wifi_to_print_task);
 
     /*
      * Drive through and detect obstacles and Stop (motor, encoder, IR, Ultrasonic) [Max 3 marks]
@@ -268,6 +282,7 @@ void vLaunch(void)
 int main(void)
 {
     stdio_init_all();
-    vLaunch();
+    // vLaunch();
+    wifi();
     return 0;
 }
