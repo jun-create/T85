@@ -1,42 +1,18 @@
-// Description: This file contains the code for the TCP server, majority sourced from the Pico SDK examples.
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include "hardware/gpio.h"
 
-#include "pico/cyw43_arch.h"
-#include "pico/stdlib.h"
+/*
+ * From pico examples
+ * Updated as needed
+ */
+#include "wifi.h"
 
-#include "lwip/ip4_addr.h"
-#include "lwip/pbuf.h"
-#include "lwip/tcp.h"
+TCP_SERVER_T *myServer = NULL;
+MessageBufferHandle_t wifiMsgBuffer;
+MessageBufferHandle_t wifiMsgBufferFromISR;
 
-#include "FreeRTOS.h"
-#include "task.h"
-#include "message_buffer.h"
-
-#define TCP_PORT 4242
-#define BUF_SIZE 2048
-#define wifi_TASK_MESSAGE_BUFFER_SIZE (60)
-MessageBufferHandle_t xControl_Process_Task_Buffer;
-
-// TCP Packet structure
-typedef struct TCP_SERVER_T_
-{
-    struct tcp_pcb *server_pcb;
-    struct tcp_pcb *client_pcb;
-    bool connected;
-    char buffer_sent[BUF_SIZE];
-    uint8_t buffer_recv[BUF_SIZE];
-    int sent_len;
-    int recv_len;
-    int run_count;
-} TCP_SERVER_T;
-
-// Main function to initialize the TCP server
+// Initialize the TCP server state
 static TCP_SERVER_T *tcp_server_init(void)
 {
-    TCP_SERVER_T *state = calloc(1, sizeof(TCP_SERVER_T));
+    TCP_SERVER_T *state = calloc(1, sizeof(TCP_SERVER_T)); // Allocate memory for the server state.
     if (!state)
     { // Check if memory allocation failed.
         return NULL;
@@ -44,204 +20,121 @@ static TCP_SERVER_T *tcp_server_init(void)
     return state;
 }
 
-// Checks if the lwIP stack has encountered an error
+// Handle TCP server errors
 static void tcp_server_err(void *arg, err_t err)
 {
     if (err != ERR_ABRT)
-    { // Check if the error is not an abort error.
-        printf("Error code: %d\n", err);
+    {                                    // Check if the error is not an abort error.
+        printf("Error code: %d\n", err); // Print the error code.
     }
 }
 
-// Function to send data to the client
-err_t tcp_server_send_data(struct pbuf *p, void *arg)
+// Send data over the TCP connection
+err_t tcp_server_send_data(struct pbuf *p, TCP_SERVER_T *state)
 {
-    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-    if (!state->connected)
+    if (state == NULL)
     {
-        printf("[wifi] Not connected\n");
+        return ERR_OK;
+    }
+    if (state->connected == false)
+    {
         return ERR_OK;
     }
     int len = p->tot_len;
     if (p->tot_len > BUF_SIZE)
         len = BUF_SIZE;
-    // copy payload into buffer
-    strncpy(state->buffer_sent, p->payload, len);
-    cyw43_arch_lwip_check();
-    // send the buffer
-    // err_t err2 = tcp_write(tpcb, "hi\n", 3, TCP_WRITE_FLAG_COPY);              // Write data to the TCP connection
-    err_t err = tcp_write(state->client_pcb, state->buffer_sent, len, TCP_WRITE_FLAG_COPY); // Write data to the TCP connection
-    // Check if the write operation failed
+    strncpy(state->buffer_sent, p->payload, len); // Copy "ok" to the send buffer.
+
+    cyw43_arch_lwip_begin();                                                                // Aquire lock for wifi
+    cyw43_arch_lwip_check();                                                                // Check the lwIP stack for readiness.
+    err_t err = tcp_write(state->client_pcb, state->buffer_sent, len, TCP_WRITE_FLAG_COPY); // Write data to the TCP connection.
+    cyw43_arch_lwip_end();                                                                  // release the locks
+
     if (err != ERR_OK)
-    {
-        printf("[wifi] Failed to write data!\n");
+    {                                      // Check if the write operation failed.
+        printf("Failed to write data!\n"); // Print an error message.
         return err;
     }
-    else
-    {
-        printf("[wifi] Data sent successfully!\n");
-        return ERR_OK;
-    }
-}
-
-err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
-{
-    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-    // Check if the received packet buffer is invalid
-    if (!p)
-    {
-        printf("[wifi] Something went wrong!\n");
-        return ERR_BUF;
-    }
-    cyw43_arch_lwip_check();
-    // Check if the received data is empty
-    if (strlen(p->payload) == 0)
-    {
-        // Free the packet buffer
-        pbuf_free(p);
-        return ERR_OK;
-    }
-    // Check if the total length of received data is greater than 0
-    else if (p->tot_len > 0)
-    {
-        // Send the received data to the process task
-        xMessageBufferSend(xControl_Process_Task_Buffer,
-                           p->payload,
-                           p->tot_len,
-                           portMAX_DELAY);
-        // Print the received data
-        printf("[wifi][Buffer] value: %0.s\n[wifi][Buffer] len: %d\n", p->tot_len, p->payload, p->tot_len);
-    }
-    // Send a response to the client
-    tcp_server_send_data(p, arg);
-
-    // Free packet buffer
-    pbuf_free(p);
     return ERR_OK;
 }
 
-// Accept a client connection
 static err_t tcp_server_accept(void *arg, struct tcp_pcb *client_pcb, err_t err)
-{
-    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-    // Check for errors or invalid client protocol control block
+{                                              // Handle incoming client connections.
+    TCP_SERVER_T *state = (TCP_SERVER_T *)arg; // Retrieve the server state from the argument.
     if (err != ERR_OK || client_pcb == NULL)
-    {
-        printf("[wifi] Failure in accept\n");
+    {                                  // Check for errors or invalid client protocol control block.
+        printf("Failure in accept\n"); // Print an error message.
         return ERR_VAL;
     }
-    printf("[wifi] Client connected\n");
-    state->client_pcb = client_pcb; // Store the client's protocol control block.
-    tcp_arg(client_pcb, state);
-    tcp_recv(client_pcb, tcp_server_recv);
-    tcp_err(client_pcb, tcp_server_err);
-
+    printf("Client connected\n");          // Print a message indicating a successful client connection.
+    state->client_pcb = client_pcb;        // Store the client's protocol control block.
+    tcp_arg(client_pcb, state);            // Set the argument for the client's TCP connection.
+    tcp_recv(client_pcb, tcp_server_recv); // Set the callback for receiving data on the client connection.
+    tcp_err(client_pcb, tcp_server_err);   // Set the callback for handling errors on the client connection.
     state->connected = true;
     return ERR_OK;
 }
 
-// Open the server
 static bool tcp_server_open(void *arg)
-{
-    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;
-    printf("[wifi] Starting server at %s on port %u\n", ip4addr_ntoa(netif_ip4_addr(netif_list)), TCP_PORT); // Print a message with server details.
-    struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
-    // Check if the PCB creation failed
+{                                                                                                     // Open and start the TCP server.
+    TCP_SERVER_T *state = (TCP_SERVER_T *)arg;                                                        // Retrieve the server state from the argument.
+    printf("Starting server at %s on port %u\n", ip4addr_ntoa(netif_ip4_addr(netif_list)), TCP_PORT); // Print a message with server details.
+    struct tcp_pcb *pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);                                           // Create a new TCP protocol control block.
     if (!pcb)
-    {
-        printf("[wifi] Failed to create pcb\n");
+    {                                     // Check if the PCB creation failed.
+        printf("Failed to create pcb\n"); // Print an error message.
         return false;
     }
-    err_t err = tcp_bind(pcb, NULL, TCP_PORT);
-    // Check if the binding operation failed
+    err_t err = tcp_bind(pcb, NULL, TCP_PORT); // Bind the PCB to the specified port.
     if (err)
-    {
-        printf("Failed to bind to port %u\n", TCP_PORT);
+    {                                                    // Check if the binding operation failed.
+        printf("Failed to bind to port %u\n", TCP_PORT); // Print an error message.
         return false;
     }
-    state->server_pcb = tcp_listen_with_backlog(pcb, 1);
-    // Check if listening failed
+    state->server_pcb = tcp_listen_with_backlog(pcb, 1); // Listen for incoming connections with a backlog of 1.
     if (!state->server_pcb)
-    {
-        printf("[wifi] Failed to listen\n");
+    {                                 // Check if listening failed.
+        printf("Failed to listen\n"); // Print an error message.
         if (pcb)
         {
-            tcp_close(pcb);
+            tcp_close(pcb); // Close the PCB if it was created.
         }
         return false;
     }
-    tcp_arg(state->server_pcb, state);                // Set the argument for the server PCB
-    tcp_accept(state->server_pcb, tcp_server_accept); // Set the callback for accepting client connections
-
     state->connected = false;
+    tcp_arg(state->server_pcb, state);                // Set the argument for the server PCB.
+    tcp_accept(state->server_pcb, tcp_server_accept); // Set the callback for accepting client connections.
+    myServer = state;
     return true;
 }
 
-// Start the server
 void start_server(__unused void *params)
-{
-    // Initialize special hardware component
-    if (cyw43_arch_init())
-    {
-        printf("[wifi] Failed to initialise\n");
-        return;
-    }
-    cyw43_arch_enable_sta_mode();
-    printf("[wifi] Connecting to Wi-Fi...\n");
-    if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000))
-    {
-        printf("[wifi] Failed to connect.\n");
-        return;
-    }
-    else
-    {
-        printf("[wifi] Connected.\n");
-    }
-    TCP_SERVER_T *state = tcp_server_init();
-    // Check state of tcp server
+{                                            // Entry point for the server task.
+    TCP_SERVER_T *state = tcp_server_init(); // Initialize the TCP server state.
     if (!state)
-    {
-        printf("[wifi] Failed to allocate state\n");
+    {                                         // Check if state initialization failed.
+        printf("Failed to allocate state\n"); // Print an error message.
         return;
     }
-    // Check if the server failed to start
     if (!tcp_server_open(state))
-    {
-        printf("[wifi] Failed to start server\n");
+    {                                       // Start the TCP server.
+        printf("Failed to start server\n"); // Print an error message on server start failure.
         return;
     }
-    while (true)
-    {
-        vTaskDelay(1000);
-    }
+    printf("complete server setup!\n");
 }
 
-void process_task(__unused void *params)
+void initWifi()
 {
-    while (true)
-    {
-        char buffer[BUF_SIZE];
-        xMessageBufferReceive(xControl_Process_Task_Buffer,
-                              buffer,
-                              BUF_SIZE,
-                              portMAX_DELAY);
-        printf("[wifi][Buffer] value: %0.s\n[wifi][Buffer] len: %d\n", BUF_SIZE, buffer, BUF_SIZE);
-        // TO DO: send the data
+    if (cyw43_arch_init())
+    {                                     // Initialize a specific hardware component.
+        printf("Failed to initialise\n"); // Print an error message.
+        return;
     }
-}
-
-void wifi()
-{
-    stdio_init_all();
-    // stdio_usb_init()
-    sleep_ms(5000);
-    // Create the server task
-    TaskHandle_t wifi_task;
-    xTaskCreate(start_server, "StartServer", configMINIMAL_STACK_SIZE, NULL, 4, &wifi_task);
-    // Other tasks may go here...
-    TaskHandle_t process_task_hdle;
-    xTaskCreate(process_task, "PrintTask", configMINIMAL_STACK_SIZE, NULL, 4, &process_task_hdle);
-    xControl_Process_Task_Buffer = xMessageBufferCreate(wifi_TASK_MESSAGE_BUFFER_SIZE);
-    // Start the FreeRTOS task scheduler
-    vTaskStartScheduler();
+    cyw43_arch_enable_sta_mode();       // Enable a specific Wi-Fi mode.
+    printf("Connecting to Wi-Fi...\n"); // Print a message indicating a Wi-Fi connection attempt.
+    while (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 30000))
+    {                                   // Attempt to connect to Wi-Fi.
+        printf("Failed to connect.\n"); // Print an error message on Wi-Fi connection failure.
+    }
 }

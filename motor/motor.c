@@ -1,145 +1,152 @@
-/*
- * This code is cutdown version of the Pico LWIP examples.
- * [MOTOR] Its functions are to control the motor of the embedded systems car.
+/**
+ * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
  */
 
 // Output PWM signals on pins 0 and 1
+
+
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 #include "hardware/gpio.h"
-#include <sys/time.h>
-#include "encoder.h"
+#include "hardware/timer.h"
+#include "motor.h"
+#include "magnometer.h"
 
 // Left Motor
-#define ENA_PIN 10
-// Left Wheel Control 1 (CW)
-#define IN1_PIN 11
-// Left Wheel Control 2 (CCW)
-#define IN2_PIN 12
+#define ENB_PIN 5
+#define IN3_PIN 6
+#define IN4_PIN 7
 
 // Right Motor
-#define ENB_PIN 13
-// Right Wheel Control 3 (CW)
-#define IN3_PIN 14
-// Right Wheel Control 4 (CCW)
-#define IN4_PIN 15
+#define ENA_PIN 20
+#define IN1_PIN 19
+#define IN2_PIN 18
 
-// Wheel size
+//Wheel values
 #define CIRCUMFERENCE 21
+#define NUM_OF_HOLES 20
+#define LEFT_WHEEL_PIN 0xC0 //bit 6 and 7
+#define LW_FW 0x40
+#define LW_RV 0x80
 
-// Turn time in ms
-#define MOVE_TIME 5000
-#define DEFAULT_SPEED 62500
+#define RIGHT_WHEEL_PIN 0xC0000 //bit 18 and 19
+#define RW_RV 0x40000 //bit 18
+#define RW_FW 0x80000 //bit 19
 
-void init_gpio()
-{
-    gpio_init(0);
-    gpio_init(1);
+
+volatile long long  g_left_wheel_code = 0;
+volatile long long  g_right_wheel_code = 0;
+volatile unsigned int speed = 0;
+
+
+uint slice_num_1;
+uint slice_num_2;
+
+//Initialise the respective gpio pins
+void init_engine() {
 
     gpio_init(IN1_PIN);
     gpio_init(IN2_PIN);
     gpio_init(IN3_PIN);
     gpio_init(IN4_PIN);
-
     gpio_set_dir(IN1_PIN, GPIO_OUT);
     gpio_set_dir(IN2_PIN, GPIO_OUT);
     gpio_set_dir(IN3_PIN, GPIO_OUT);
     gpio_set_dir(IN4_PIN, GPIO_OUT);
-
-    gpio_set_dir(0, GPIO_OUT);
-    gpio_set_dir(1, GPIO_OUT);
-    gpio_put(0, 1);
-    gpio_put(1, 1);
 }
 
-void move_forward()
-{
-    gpio_put(IN1_PIN, 1);
-    gpio_put(IN2_PIN, 0);
-    gpio_put(IN3_PIN, 1);
-    gpio_put(IN4_PIN, 0);
-}
+//initialise the motor
+void init_motor(uint16_t default_speed) {
 
-void move_back()
-{
-    gpio_put(IN1_PIN, 0);
-    gpio_put(IN2_PIN, 1);
-    gpio_put(IN3_PIN, 0);
-    gpio_put(IN4_PIN, 1);
-}
-
-// initialize the motor
-void init_motor_parts(uint *slice_num_1, uint *slice_num_2)
-{
     gpio_set_function(ENA_PIN, GPIO_FUNC_PWM);
     gpio_set_function(ENB_PIN, GPIO_FUNC_PWM);
 
-    pwm_set_clkdiv(*slice_num_1, 100);
-    pwm_set_clkdiv(*slice_num_2, 100);
+    slice_num_1 = pwm_gpio_to_slice_num(ENA_PIN);
+    slice_num_2 = pwm_gpio_to_slice_num(ENB_PIN);
 
-    pwm_set_wrap(*slice_num_1, DEFAULT_SPEED);
-    pwm_set_wrap(*slice_num_2, DEFAULT_SPEED);
+    pwm_set_clkdiv(slice_num_1, 100);
+    pwm_set_clkdiv(slice_num_2, 100);
 
-    pwm_set_chan_level(*slice_num_1, PWM_CHAN_A, DEFAULT_SPEED / 2);
-    pwm_set_chan_level(*slice_num_2, PWM_CHAN_B, DEFAULT_SPEED / 2);
+    pwm_set_wrap(slice_num_1, default_speed);
+    pwm_set_wrap(slice_num_2, default_speed);
 
-    pwm_set_enabled(*slice_num_1, true);
-    pwm_set_enabled(*slice_num_2, true);
+    pwm_set_chan_level(slice_num_1, PWM_CHAN_A, default_speed);
+    pwm_set_chan_level(slice_num_2, PWM_CHAN_B, default_speed);
+
+    pwm_set_enabled(slice_num_1, true);
+    pwm_set_enabled(slice_num_2, true);
 }
 
-/*
- * Turns the left motor less than the right motor
- * to turn the car left
- */
-void steer_left(uint *slice_num_1, uint *slice_num_2)
-{
-    // Slow down the left motor
-    pwm_set_chan_level(*slice_num_1, PWM_CHAN_A, DEFAULT_SPEED * 0.2);
-    sleep_ms(MOVE_TIME);
-
-    // Reset left motor speed
-    pwm_set_chan_level(*slice_num_1, PWM_CHAN_A, DEFAULT_SPEED);
+//Move forward
+void forward() {
+    gpio_clr_mask(RW_RV | LW_RV);
+    gpio_set_mask(RW_FW | LW_FW);
 }
 
-/*
- * Turns the right motor less than the left motor
- * to turn the car right
- */
-void steer_right(uint *slice_num_1, uint *slice_num_2)
-{
-    // Slow down the left motor
-    pwm_set_chan_level(*slice_num_2, PWM_CHAN_B, DEFAULT_SPEED * 0.2);
-    sleep_ms(MOVE_TIME);
-
-    // Reset left motor speed
-    pwm_set_chan_level(*slice_num_2, PWM_CHAN_B, DEFAULT_SPEED);
+//Move backward
+void backwards() {
+    gpio_clr_mask(RW_FW | LW_FW);
+    gpio_set_mask(RW_RV | LW_RV);
 }
 
-int motor()
-{
-    init_gpio();
-    stdio_init_all();
-    gpio_set_irq_enabled_with_callback(9, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+void rotate_clockwise(){
+    gpio_clr_mask(LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN);
+    gpio_set_mask(RW_RV | LW_FW);
+}
 
-    // get the slice num
-    uint slice_num_1 = pwm_gpio_to_slice_num(ENA_PIN);
-    uint slice_num_2 = pwm_gpio_to_slice_num(ENB_PIN);
-    init_motor_parts(&slice_num_1, &slice_num_2);
+void rotate_counter_clockwise(){
+    gpio_clr_mask(LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN);
+    gpio_set_mask(RW_FW | LW_RV);
+}
 
-    // while loop to control the car
-    while (1)
-    {
-        move_forward();
-        sleep_ms(MOVE_TIME);
-        move_back();
-        sleep_ms(MOVE_TIME);
-        // forward left
-        move_forward();
-        steer_left(&slice_num_1, &slice_num_2);
-        // forward right
-        move_forward();
-        steer_right(&slice_num_1, &slice_num_2);
-    }
-    return 0;
+void stop() {
+    gpio_clr_mask(LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN);
+}
+
+bool is_stop() {
+    uint32_t pins = gpio_get_all();
+    return 0 == (pins & (LEFT_WHEEL_PIN | RIGHT_WHEEL_PIN));
+}
+
+void stop_left() {
+    gpio_clr_mask(LEFT_WHEEL_PIN);
+}
+
+void stop_right() {
+    gpio_clr_mask(RIGHT_WHEEL_PIN);
+}
+
+void set_speed(uint16_t current_speed){
+    speed = current_speed;
+    pwm_set_chan_level(slice_num_1, PWM_CHAN_A, current_speed);
+    pwm_set_chan_level(slice_num_2, PWM_CHAN_B, current_speed);
+    return;
+}
+
+//Turn left 
+void left_tilt() {
+    //Slow right motor
+    pwm_set_chan_level(slice_num_2, PWM_CHAN_B, speed * 0.5);
+}
+
+//Turn right
+void right_tilt() {
+    //Slow left motor
+    pwm_set_chan_level(slice_num_1, PWM_CHAN_A, speed * 0.8);
+}
+
+void left_wheel_encoder_handler(uint32_t events){
+    ++g_left_wheel_code;
+}
+
+void right_wheel_encoder_handler(uint32_t events){
+    ++g_right_wheel_code;
+}
+
+void reset_wheel_encoder(){
+    g_left_wheel_code = 0;
+    g_right_wheel_code = 0;
 }

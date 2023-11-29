@@ -1,31 +1,28 @@
-#ifndef MOTOR_H
-#define MOTOR_H
+#include "stdint.h"
+#ifndef motor_h
+#define motor_h
+void init_engine();
+void init_motor(uint16_t default_speed);
+void forward();
+void backwards();
+void stop();
+void left_tilt();
+void right_tilt();
+void set_speed(uint16_t current_speed);
+// void move_forward_with_distance(int wheel_encoder_pin, int IN1_PIN, int IN2_PIN, int IN3_PIN, int IN4_PIN, double distance);
 
-#include <stdint.h>
-#include <stdio.h>
-
-// Motor control pins
-#define ENA_PIN 10
-#define IN1_PIN 11
-#define IN2_PIN 12
-
-#define ENB_PIN 13
-#define IN3_PIN 14
-#define IN4_PIN 15
-
-// Wheel circumference
-#define CIRCUMFERENCE 21
-
-// Turn time in milliseconds
-#define MOVE_TIME 5000
-#define DEFAULT_SPEED 62500
-
-// Function prototypes
-void init_gpio();
-void move_forward();
-void move_back();
-void init_motor_parts(uint *slice_num_1, uint *slice_num_2);
-void steer_left(uint *slice_num_1, uint *slice_num_2);
-void steer_right(uint *slice_num_1, uint *slice_num_2);
+#define right_wheel_encoder_pin 3
+#define left_wheel_encoder_pin 2
+extern volatile long long g_left_wheel_code;
+extern volatile long long g_right_wheel_code;
+void left_wheel_encoder_handler();
+void right_wheel_encoder_handler();
+void rotate_clockwise();
+void rotate_counter_clockwise();
+void reset_wheel_encoder();
+#define DIST_5CM 10
+#define DIST_10CM 20
+#define DIST_20CM 40
+#define DIST_100CM 200
 
 #endif
